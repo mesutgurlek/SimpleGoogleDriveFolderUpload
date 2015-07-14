@@ -1,0 +1,277 @@
+﻿<html>
+<head>
+    <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+    <script type="text/javascript">
+        var CLIENT_ID = 'YOUR_CLIENT_ID';
+        var SCOPES = 'https://www.googleapis.com/auth/drive';
+        var webviewlink = "";
+        var parentID = [{ id: "YOUR_PARENT_FOLDER_ID" }];
+        var myFolders = [];
+        var output = document.getElementById('output');
+        var counter = 0;
+        var totalFiles;
+        var cnt = 0;
+        var outputCounter = 0;
+
+        /**
+         * Called when the client library is loaded to start the auth flow.
+         */
+        function handleClientLoad() {
+            window.setTimeout(checkAuth, 1);
+        }
+
+        /**
+         * Check if the current user has authorized the application.
+         */
+        function checkAuth() {
+            gapi.auth.authorize(
+                { 'client_id': CLIENT_ID, 'scope': SCOPES, 'immediate': true },
+                handleAuthResult);
+        }
+
+        /**
+         * Called when authorization server replies.
+         *
+         * @param {Object} authResult Authorization result.
+         */
+        function handleAuthResult(authResult) {
+            var authButton = document.getElementById('authorizeButton');
+            var filePicker = document.getElementById('filePicker');
+            authButton.style.display = 'none';
+            filePicker.style.display = 'none';
+            if (authResult && !authResult.error) {
+                // Access token has been successfully retrieved, requests can be sent to the API.
+                filePicker.style.display = 'block';
+                filePicker.onchange = uploadFile;
+            } else {
+                // No access token could be retrieved, show the button to start the authorization flow.
+                authButton.style.display = 'block';
+                authButton.onclick = function () {
+                    gapi.auth.authorize(
+                        { 'client_id': CLIENT_ID, 'scope': SCOPES, 'immediate': false },
+                        handleAuthResult);
+                };
+            }
+        }
+
+        /**
+         * Start the file upload.
+         *
+         * @param {Object} evt Arguments from the file selector.
+         */
+        function uploadFile(evt) {
+
+            var files = evt.target.files; // FileList object
+            totalFiles = files.length; // important
+            var allPaths = [];
+
+            for (var k = 0; k < totalFiles; k++) {
+                var file = evt.target.files[k];
+                var tmp = file.webkitRelativePath;
+                allPaths.push(tmp);
+            }
+
+            for (var i = 0; i < totalFiles; i++) {
+                var pathNamesArr = allPaths[i].split('/');
+
+                for (var k = 0; k < pathNamesArr.length; k++) {
+
+                    if (!isFile(pathNamesArr[k])) {
+
+                        if ((k > 0) && (!searchNames(myFolders, pathNamesArr[k], pathNamesArr[k - 1]))) {
+
+                            if (hasParent(k)) {
+                                myFolders.push({ name: pathNamesArr[k], hasParent: true, parentName: pathNamesArr[k - 1], parentId: "", id: "" });
+                                cnt++;
+                            }
+
+                        }
+
+                        else if ((k === 0) && (!searchNames(myFolders, pathNamesArr[k], "none"))) {
+                            myFolders.push({ name: pathNamesArr[k], hasParent: false, parentName: "none", parentId: parentID[0].id, id: "" });
+                            cnt++;
+
+                        }
+
+                        else if ((k > 0) && (searchNames(myFolders, pathNamesArr[k], pathNamesArr[k - 1])) && (!(pathNamesArr[k - 1] === myFolders[findIndex(pathNamesArr[k], pathNamesArr[k - 1])].parentName))) {
+                            myFolders.push({ name: pathNamesArr[k], hasParent: true, parentName: pathNamesArr[k - 1], parentId: "", id: "" });
+                            cnt++;
+                        }
+                    }
+                }
+            }
+
+            createFolders(files);
+        }
+
+        /**
+         * Insert new file.
+         *
+         * @param {File} fileData File object to read data from.
+         * @param {Function} callback Function to call when the request is complete.
+         */
+        function insertFile(insertId, fileData, callback) {
+            const boundary = '-------314159265358979323846';
+            const delimiter = "\r\n--" + boundary + "\r\n";
+            const close_delim = "\r\n--" + boundary + "--";
+
+            var reader = new FileReader();
+            reader.readAsBinaryString(fileData);
+            reader.onload = function (e) {
+                var contentType = fileData.type || 'application/octet-stream';
+                var metadata = {
+                    'title': fileData.name,
+                    'mimeType': contentType,
+                    'parents': [{ id: insertId }]
+                };
+
+                var base64Data = btoa(reader.result);
+                var multipartRequestBody =
+                    delimiter +
+                    'Content-Type: application/json\r\n\r\n' +
+                    JSON.stringify(metadata) +
+                    delimiter +
+                    'Content-Type: ' + contentType + '\r\n' +
+                    'Content-Transfer-Encoding: base64\r\n' +
+                    '\r\n' +
+                    base64Data +
+                    close_delim;
+
+                var request = gapi.client.request({
+                    'path': '/upload/drive/v2/files',
+                    'method': 'POST',
+                    'params': { 'uploadType': 'multipart' },
+                    'headers': {
+                        'Content-Type': 'multipart/mixed; boundary="' + boundary + '"'
+                    },
+                    'body': multipartRequestBody,
+                });
+
+                outputCounter++
+
+                if (outputCounter === totalFiles)
+                    output.innerText = output.innerText + " Your link for your course is: " + "http://googledrive.com/host/" + myFolders[0].id + "\n" + "Please wait 1 minute to open your course!";
+
+                if (!callback) {
+                    callback = function (file) {
+                        console.log(file)
+                    };
+                }
+                request.execute(callback);
+            }
+
+        }
+
+        //Extra Part
+        function createFolders(files) {
+
+            gapi.client.load('drive', 'v2', function () {
+
+                parentID[0].id = myFolders[counter].parentId;
+
+                var request = gapi.client.request({
+                    'path': '/drive/v2/files',
+                    'method': 'POST',
+                    'body': {
+                        "title": myFolders[counter].name,
+                        "mimeType": "application/vnd.google-apps.folder",
+                        "description": "Some",
+                        "parents": parentID
+                    }
+                });
+
+                request.execute(function (resp) {
+                    console.log(resp);
+
+                    var permissionBody = {
+                        'value': '',
+                        'type': 'anyone',
+                        'role': 'reader'
+                    };
+                    var permissionRequest = gapi.client.drive.permissions.insert({
+                        'fileId': resp.id,
+                        'resource': permissionBody
+                    });
+                    permissionRequest.execute(function (resp) { });
+
+                    //Assign id
+                    myFolders[counter].id = resp.id;
+                    //Assign parent id
+                    for (var i = 0; i < cnt; i++)
+                        if (myFolders[i].hasParent)
+                            if (myFolders[i].parentName == myFolders[counter].name)
+                                myFolders[i].parentId = resp.id;
+                    counter++;
+                    createFolders(files);
+
+                    if (cnt === counter) {
+                        gapi.client.load('drive', 'v2', function () {
+
+                            for (var k = 0; k < totalFiles; k++) {
+                                var file = files[k];
+                                var tmp = file.webkitRelativePath;
+                                var pathNamesArr = tmp.split('/');
+                                var curLength = pathNamesArr.length;
+
+                                if (curLength > 2)
+                                    insertFile(myFolders[findIndex(pathNamesArr[curLength - 2], pathNamesArr[curLength - 3])].id, file);
+                                else if (curLength === 2)
+                                    insertFile(myFolders[findIndex(pathNamesArr[curLength - 2], "none")].id, file);
+                            }
+                        });
+                        counter++;
+                    }
+
+                });
+            });
+        }
+        //HasParent
+        function hasParent(index) {
+            if ((index - 1) > -1)
+                return true;
+            return false;
+        }
+        //Find Index2
+        function findIndex(name, parentName) {
+            for (var i = 0; i < cnt; i++)
+                if ((myFolders[i].name == name) && (parentName == myFolders[i].parentName))
+                    return i;
+        }
+        //Search the names
+        function searchNames(namesArr, name, parentName) {
+            if (cnt === 0)
+                return false;
+            else {
+                for (var i = 0; i < cnt; i++) {
+                    if ((myFolders[i].name == name) && (parentName == myFolders[i].parentName)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+        //Path is file or not
+        function isFile(myName) {
+            for (var i = 0; i < myName.length; i++) {
+                if (myName.indexOf(".") > -1)
+                    return true;
+            }
+            return false;
+        }
+
+    </script>
+    <script type="text/javascript" src="https://apis.google.com/js/client.js?onload=handleClientLoad"></script>
+</head>
+<body>
+    <!--Add a file picker for the user to start the upload process
+        <input type="file" name="files[]" multiple directory webkitdirectory mozdirectory>
+         <input type="file" id="filePicker" multiple directory webkitdirectory mozdirectory />
+        <input type="button" id="authorizeButton" style="display: none" value="Authorize" />
+        -->
+    <div>
+        <input type="file" id="filePicker" multiple directory webkitdirectory mozdirectory />
+        <input type="button" id="authorizeButton" style="display: none" value="Authorize" />
+    </div>
+    <div id="output"></div>
+</body>
+</html>
